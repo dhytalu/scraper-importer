@@ -89,6 +89,7 @@ function fetch_scrapper_articles() {
     }
 
     $feed_url = $formData['target']; // URL dari form
+    $jumlah =  $formData['jumlah']; // Jumlah artikel, default ke 5 jika tidak diatur
     $status = $formData['status']; // Status post (publish/draft)
 
     // Inisialisasi cURL untuk mengambil data dari URL
@@ -117,15 +118,22 @@ function fetch_scrapper_articles() {
     // Periksa susunan XML dari elemen <url> (dapat anda sesuaikan sesuai kebutuhan)
     $data = [];
     $items = $xml->url;
+    $counter = 0;
 
     // Iterasi setiap elemen <url> dan ambil data yang diperlukan
     foreach ($items as $item) {
+        if ($counter >= $jumlah) {
+            break; // Stop looping once we reach the desired number of items
+        }
+
         $data[] = [
             'loc' => (string) $item->loc, // URL artikel
             'publication_date' => (string) $item->children('news', true)->news->children('news', true)->publication_date, // Tanggal publikasi
             'title' => (string) $item->children('news', true)->news->children('news', true)->title, // Judul artikel
             'status'    => $status 
         ];
+
+        $counter++;
     }
 
     // Kirim hasil kembali ke client-side
@@ -405,6 +413,10 @@ function scraper_importer_page() {
             <label for="target-url">Masukkan URL Sitemap:</label>
             <input type="text" id="target-url" name="target-url" placeholder="https://example.com/sitemap.xml">
             <br><br>
+
+            <label for="jumlah">Jumlah Artikel:</label>
+            <input type="number" id="jumlah" name="jumlah" min="1" max="30">
+            <br><br>
             
             <label for="status">Pilih Status Publikasi:</label>
             <select id="status" name="status">
@@ -430,9 +442,9 @@ jQuery(document).ready(function($) {
         // Ambil nilai URL dan status dari form input
         var formData = {
             'target': $('#target-url').val(),
-            'status': $('#status').val()
+            'status': $('#status').val(),
+            'jumlah': $('#jumlah').val(),
         };
-
         // Tampilkan progress saat scraping berjalan
         $('#progress').html('Sedang mengambil data...');
 
@@ -453,8 +465,11 @@ jQuery(document).ready(function($) {
                     if (Array.isArray(response.data.data)) {
                         var articles = response.data.data;
                         var totalItems = articles.length;
-                        var batchSize = 5; // Proses 10 artikel per batch
+                        var batchSize = 5; // Proses 5 artikel per batch
                         var currentBatch = 0;
+
+                        // Inisialisasi progress bar
+                        $('#progress').html('<p>Proses import dimulai...</p><progress id="progress-bar" value="0" max="${totalItems}"></progress><p id="progress-text">0 dari ${totalItems} artikel selesai</p>');
 
                         function insertBatch() {
                             // Ambil batch artikel
@@ -462,6 +477,13 @@ jQuery(document).ready(function($) {
                             var end = start + batchSize;
                             var batch = articles.slice(start, end);
 
+                            // Hitung jumlah artikel yang telah diproses
+                            var currentProgress = Math.min((currentBatch + 1) * batchSize, totalItems);
+
+                            // Update progress bar dengan nilai absolut berdasarkan jumlah artikel
+                            $('#progress-bar').val(currentProgress);
+                            $('#progress-text').text(currentProgress + ' dari ' + totalItems + ' artikel selesai');
+                            
                             // Kirim batch ke server untuk di-insert ke WordPress
                             $.ajax({
                                 url: scrapper_vars.ajax_url,
@@ -473,8 +495,6 @@ jQuery(document).ready(function($) {
                                 },
                                 success: function(response) {
                                     if (response.success) {
-                                        $('#progress').html('<p>Sedang memproses' +end +'/'+totalItems + ' </p>');
-
                                         // Lanjutkan ke batch berikutnya
                                         currentBatch++;
                                         if (currentBatch * batchSize < totalItems) {
@@ -498,7 +518,7 @@ jQuery(document).ready(function($) {
                         $('#progress').html('<p>Data tidak valid.</p>');
                     }
                 } else {
-                    $('#progress').html('<p>' + response.message + '</p>');
+                    $('#progress').html('<p>Respons :' + response.message + '</p>');
                 }
             },
             error: function(jqXHR, textStatus, errorThrown) {
